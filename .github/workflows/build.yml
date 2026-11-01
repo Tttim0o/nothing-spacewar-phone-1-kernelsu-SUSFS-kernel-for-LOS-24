@@ -50,10 +50,15 @@ jobs:
           git clone --depth=1 https://github.com/kdrag0n/proton-clang "$GITHUB_WORKSPACE/clang"
           "$GITHUB_WORKSPACE/clang/bin/clang" --version | head -1
 
-      - name: Integruj KernelSU-Next (legacy vetva - manual hook, pre starsie kernely bez KPROBES)
+      - name: Integruj KernelSU-Next (pinnuty commit, overeny inym Spacewar kernelom s rovnakym susfs patchom)
         working-directory: kernel
+        env:
+          # Tento commit pouzil zerofrip/Spacewar_LOS_Kernel (rovnaky vendor kernel, sm7325) -
+          # predchadza pkg_observer.c (TWA_RESUME/fsnotify problem) a ma selinux.c strukturu,
+          # na aku je 10_enable_susfs_for_ksu.patch skutocne pisany, takze hunky sadnu cisto.
+          KSUN_PIN: "7ac03d638c07bac1cb1ae9749fdf7e0db60b4a7a"
         run: |
-          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/legacy/kernel/setup.sh" | bash -s legacy
+          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/legacy/kernel/setup.sh" | bash -s "$KSUN_PIN"
 
       - name: Compat shim pre linux/pgtable.h (hlavicka pribudla az v 5.10+, tento kernel je 5.4)
         working-directory: kernel
