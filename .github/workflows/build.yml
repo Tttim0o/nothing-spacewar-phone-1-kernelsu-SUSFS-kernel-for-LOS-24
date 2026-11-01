@@ -25,6 +25,9 @@ jobs:
       ANYKERNEL: "https://github.com/osm0sis/AnyKernel3"
 
     steps:
+      - name: Checkout tohto repozitara (scripts/, workflow)
+        uses: actions/checkout@v4
+
       - name: Priprava prostredia
         run: |
           sudo apt-get update
