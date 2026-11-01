@@ -52,20 +52,61 @@ jobs:
         run: |
           git clone --depth=1 -b "$SUSFS_BRANCH" \
             https://gitlab.com/simonpunk/susfs4ksu.git ../susfs4ksu
+
+          echo "=== 1. Nove SUSFS zdrojove subory (fs/ include/) ==="
           cp ../susfs4ksu/kernel_patches/fs/* fs/ 2>/dev/null || true
           cp ../susfs4ksu/kernel_patches/include/linux/* include/linux/ 2>/dev/null || true
-          cp ../susfs4ksu/kernel_patches/KernelSU*/* KernelSU-Next/ 2>/dev/null || true
-          echo "=== hladam SUSFS patch pre 5.4 ==="
-          ls ../susfs4ksu/kernel_patches/
-          SUSFS_PATCH=$(ls ../susfs4ksu/kernel_patches/50_add_susfs_in_*.patch 2>/dev/null | grep -E '5[._]4' | head -1)
-          echo "Pouzivam patch: ${SUSFS_PATCH:-ZIADNY NENAJDENY}"
-          if [ -n "$SUSFS_PATCH" ]; then
-            patch -p1 < "$SUSFS_PATCH" || echo "VAROVANIE: SUSFS patch nepresiel cisto (riesime nizsie kontrolou configu)"
-          else
-            echo "VAROVANIE: nenasiel sa 5.4 SUSFS patch"
+
+          echo "=== 2. SUSFS hooky do KernelSU-Next (realny patch, nie cp) ==="
+          cd KernelSU-Next
+          patch -p1 --batch --fuzz=3 < ../../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch
+          cd ..
+
+          echo "=== 3. Hlavny SUSFS patch do kernel stromu (non-interaktivne, preskoci chybajuce subory) ==="
+          patch -p1 --batch --fuzz=3 -N < ../susfs4ksu/kernel_patches/50_add_susfs_in_kernel-5.4.patch || \
+            echo "VAROVANIE: niektore hunky nesadli, dolepujem rucne nizsie"
+
+          echo "=== 4. Rucna oprava pre hunky, ktore na tomto LOS strome nesadli kvoli inemu kontextu ==="
+          # include/linux/mount.h: tento strom ma navyse "void *data;" za ANDROID_KABI_RESERVE(4)
+          if ! grep -q "CONFIG_KSU_SUSFS" include/linux/mount.h; then
+            python3 - <<'PYEOF'
+import re
+p = "include/linux/mount.h"
+s = open(p).read()
+old = "\tANDROID_KABI_RESERVE(4);\n\tvoid *data;\n} __randomize_layout;"
+new = ("#ifdef CONFIG_KSU_SUSFS\n"
+       "\tANDROID_KABI_USE(4, u64 susfs_mnt_id_backup);\n"
+       "#else\n"
+       "\tANDROID_KABI_RESERVE(4);\n"
+       "#endif\n"
+       "\tvoid *data;\n} __randomize_layout;")
+assert old in s, "mount.h: ocakavany kontext sa nenasiel, treba rucne skontrolovat"
+open(p, "w").write(s.replace(old, new, 1))
+print("mount.h: OK")
+PYEOF
           fi
-          curl -LSs "https://raw.githubusercontent.com/WildPlusKernel/kernel_patches/main/69_hide_stuff.patch" -o hide.patch
-          patch -p1 < hide.patch || echo "VAROVANIE: hide_stuff patch nepresiel cisto"
+
+          # fs/proc/task_mmu.c: tento strom ma navyse 2 includy za pkeys.h (mm_inline.h, ctype.h)
+          if ! grep -q "susfs_def.h" fs/proc/task_mmu.c; then
+            python3 - <<'PYEOF'
+p = "fs/proc/task_mmu.c"
+s = open(p).read()
+old = "#include <linux/pkeys.h>\n"
+new = (old +
+       "#ifdef CONFIG_KSU_SUSFS_SUS_KSTAT\n"
+       "#include <linux/susfs_def.h>\n"
+       "#endif\n")
+assert old in s, "task_mmu.c: ocakavany kontext sa nenasiel, treba rucne skontrolovat"
+open(p, "w").write(s.replace(old, new, 1))
+print("task_mmu.c: OK")
+PYEOF
+          fi
+
+          echo "=== 5. bootconfig.c spoof - preskakujem, subor v tomto strome neexistuje (volitelne, neblokujuce) ==="
+          rm -f fs/proc/bootconfig.c.orig fs/proc/task_mmu.c.rej include/linux/mount.h.rej 2>/dev/null || true
+
+          echo "=== 6. Maphide / anti-detekcia (hide_stuff) - zdrojova URL momentalne nedostupna (404), preskakujem ==="
+          echo "TODO: najst aktualny zdroj 69_hide_stuff.patch a doplnit v buducom builde"
 
       - name: Zapni KSU/SUSFS vo fragmente
         working-directory: kernel
