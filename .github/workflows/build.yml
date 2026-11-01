@@ -133,6 +133,9 @@ jobs:
           if ! grep -q "susfs_def.h" fs/proc/task_mmu.c; then
             python3 "$GITHUB_WORKSPACE/scripts/fix_task_mmu.py"
           fi
+          if grep -q "bool is_zygote_child = susfs_is_sid_equal" KernelSU-Next/kernel/core_hook.c; then
+            python3 "$GITHUB_WORKSPACE/scripts/fix_core_hook.py"
+          fi
 
           echo "=== 5. bootconfig.c spoof - preskakujem, subor v tomto strome neexistuje (volitelne, neblokujuce) ==="
           rm -f fs/proc/bootconfig.c.orig fs/proc/task_mmu.c.rej include/linux/mount.h.rej 2>/dev/null || true
