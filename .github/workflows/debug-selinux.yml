@@ -21,7 +21,7 @@ jobs:
         run: |
           git clone --depth=1 -b kernel-5.4 https://gitlab.com/simonpunk/susfs4ksu.git ../susfs4ksu
           cd KernelSU-Next
-          patch -p1 --batch --fuzz=3 -N < ../../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch
+          patch -p1 --batch --fuzz=3 -N < ../../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true
           cd ..
 
       - name: Dump vysledny selinux.c cely + grep na problem miesta
