@@ -7,15 +7,31 @@ jobs:
   dump:
     runs-on: ubuntu-22.04
     steps:
-      - name: Clone susfs4ksu kernel-5.4
+      - name: Stiahni kernel zdrojaky (plytke, len pre strukturu)
         run: |
-          git clone --depth=1 -b kernel-5.4 https://gitlab.com/simonpunk/susfs4ksu.git susfs4ksu
+          git clone --depth=1 -b lineage-24.0 https://github.com/LineageOS/android_kernel_nothing_sm7325 kernel
 
-      - name: Dump core_hook.c diff section + is_zygote_child context
+      - name: Integruj KernelSU-Next (pinnuty commit)
+        working-directory: kernel
         run: |
-          P=susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch
-          echo "=== cely diff blok pre kernel/core_hook.c ==="
-          awk '/^diff --git a\/kernel\/core_hook.c/{f=1} f && /^diff --git/ && !/core_hook.c/{exit} f' "$P"
-      - name: Dump 1430 context (sucompat.c header check)
+          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/legacy/kernel/setup.sh" | bash -s 7ac03d638c07bac1cb1ae9749fdf7e0db60b4a7a
+
+      - name: Aplikuj SUSFS patch na KernelSU-Next
+        working-directory: kernel
         run: |
-          grep -n "is_zygote_child" susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch
+          git clone --depth=1 -b kernel-5.4 https://gitlab.com/simonpunk/susfs4ksu.git ../susfs4ksu
+          cd KernelSU-Next
+          patch -p1 --batch --fuzz=3 -N < ../../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch || true
+          cd ..
+
+      - name: Dump vysledny core_hook.c okolo riadku 1025 a oboch is_zygote_child miest
+        working-directory: kernel
+        run: |
+          echo "=== cely subor, riadky 970-1060 ==="
+          sed -n '970,1060p' KernelSU-Next/kernel/core_hook.c
+          echo ""
+          echo "=== VSETKY vyskyty is_zygote_child s cislami riadkov ==="
+          grep -n "is_zygote_child" KernelSU-Next/kernel/core_hook.c
+          echo ""
+          echo "=== reject subor ak existuje ==="
+          cat KernelSU-Next/kernel/core_hook.c.rej 2>&1 || echo "ziadny reject subor"
