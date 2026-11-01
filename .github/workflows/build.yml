@@ -37,6 +37,14 @@ jobs:
           git clone --depth=1 -b "${{ github.event.inputs.los_branch }}" \
             "$KERNEL_SRC" kernel
 
+      - name: Cache ccache (skompilovane objekty - zrychli dalsie beh po oprave par suborov)
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ccache-spacewar-los24-${{ github.run_id }}
+          restore-keys: |
+            ccache-spacewar-los24-
+
       - name: Clang toolchain (Proton)
         run: |
           git clone --depth=1 https://github.com/kdrag0n/proton-clang "$GITHUB_WORKSPACE/clang"
@@ -149,13 +157,18 @@ jobs:
           export PATH="$GITHUB_WORKSPACE/clang/bin:$PATH"
           export ARCH=arm64 SUBARCH=arm64
           export KBUILD_BUILD_USER=claude KBUILD_BUILD_HOST=github-actions
-          MAKE_ARGS="O=out ARCH=arm64 CC=clang LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- CLANG_TRIPLE=aarch64-linux-gnu-"
-          make $MAKE_ARGS $DEFCONFIG
+          export CCACHE_DIR="$HOME/.ccache"
+          export CCACHE_MAXSIZE=3G
+          ccache --zero-stats || true
+          MAKE_ARGS=(O=out ARCH=arm64 "CC=ccache clang" LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- CLANG_TRIPLE=aarch64-linux-gnu-)
+          make "${MAKE_ARGS[@]}" $DEFCONFIG
           echo "=== kontrola, ci sa KSU a SUSFS naozaj zapli ==="
           grep -q "CONFIG_KSU=y" out/.config || { echo "CHYBA: KSU nie je v .config - KSU integracia zlyhala"; exit 1; }
           grep -q "CONFIG_KSU_SUSFS=y" out/.config || { echo "CHYBA: SUSFS nie je v .config - SUSFS patch sa neaplikoval"; exit 1; }
           echo "OK: KSU aj SUSFS su zapnute"
-          make -j$(nproc) $MAKE_ARGS KCFLAGS="-Wno-error"
+          make -j"$(nproc)" "${MAKE_ARGS[@]}" KCFLAGS="-Wno-error"
+          echo "=== ccache statistiky (kolko sa usetrilo) ==="
+          ccache --show-stats || true
 
       - name: Zabal AnyKernel3 zip
         run: |
