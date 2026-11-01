@@ -1,0 +1,21 @@
+name: Debug - dump susfs4ksu patches
+
+on:
+  workflow_dispatch:
+
+jobs:
+  dump:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Clone susfs4ksu kernel-5.4
+        run: |
+          git clone --depth=1 -b kernel-5.4 https://gitlab.com/simonpunk/susfs4ksu.git susfs4ksu
+
+      - name: Dump core_hook.c diff section + is_zygote_child context
+        run: |
+          P=susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch
+          echo "=== cely diff blok pre kernel/core_hook.c ==="
+          awk '/^diff --git a\/kernel\/core_hook.c/{f=1} f && /^diff --git/ && !/core_hook.c/{exit} f' "$P"
+      - name: Dump 1430 context (sucompat.c header check)
+        run: |
+          grep -n "is_zygote_child" susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch
