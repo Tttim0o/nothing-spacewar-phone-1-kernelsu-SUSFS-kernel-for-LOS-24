@@ -58,9 +58,19 @@ jobs:
           cp ../susfs4ksu/kernel_patches/include/linux/* include/linux/ 2>/dev/null || true
 
           echo "=== 2. SUSFS hooky do KernelSU-Next (realny patch, nie cp) ==="
+          echo "Pozn.: tento patch je pisany pre konkretny starsi commit KernelSU-Next,"
+          echo "takze niektore subory (napr. throne_tracker.*) nemusia existovat v 'next' HEAD."
+          echo "To je bezne a nie je to fatalne - kluciove je, ci sa zapise Kconfig a core_hook.c."
           cd KernelSU-Next
-          patch -p1 --batch --fuzz=3 < ../../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch
+          set +e
+          patch -p1 --batch --fuzz=3 -N < ../../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch 2>&1 | tee /tmp/ksu_susfs_patch.log
+          set -e
           cd ..
+          echo "=== Zhrnutie: ktore subory sa upravili ==="
+          grep -E "^patching file|Skipping patch" /tmp/ksu_susfs_patch.log || true
+          echo "=== Kriticka kontrola: zapisal sa Kconfig? ==="
+          grep -q "KSU_SUSFS" KernelSU-Next/kernel/Kconfig && echo "OK: Kconfig ma KSU_SUSFS" || \
+            { echo "CHYBA: Kconfig patch na KernelSU-Next zlyhal, SUSFS sa nezapne"; exit 1; }
 
           echo "=== 3. Hlavny SUSFS patch do kernel stromu (non-interaktivne, preskoci chybajuce subory) ==="
           patch -p1 --batch --fuzz=3 -N < ../susfs4ksu/kernel_patches/50_add_susfs_in_kernel-5.4.patch || \
