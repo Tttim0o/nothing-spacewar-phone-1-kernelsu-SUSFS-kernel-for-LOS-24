@@ -18,8 +18,10 @@ jobs:
     permissions:
       contents: write
     env:
-      DEFCONFIG: "vendor/lahaina-qgki_defconfig vendor/lahaina_QGKI.config"
-      CONFIG_FRAGMENT: "arch/arm64/configs/vendor/lahaina_QGKI.config"
+      # Presne TARGET_KERNEL_CONFIG z LineageOS android_device_nothing_Spacewar. Moduly vo
+      # vendor_dlkm ostavaju z ROM-ky, takze .config sa nesmie lisit (okrem KSU/SUSFS).
+      DEFCONFIG: "vendor/lahaina-qgki_defconfig vendor/debugfs.config"
+      CONFIG_FRAGMENT: "arch/arm64/configs/vendor/debugfs.config"
       KERNEL_SRC: "https://github.com/LineageOS/android_kernel_nothing_sm7325"
       SUSFS_BRANCH: "kernel-5.4"
       ANYKERNEL: "https://github.com/osm0sis/AnyKernel3"
