@@ -67,39 +67,11 @@ jobs:
             echo "VAROVANIE: niektore hunky nesadli, dolepujem rucne nizsie"
 
           echo "=== 4. Rucna oprava pre hunky, ktore na tomto LOS strome nesadli kvoli inemu kontextu ==="
-          # include/linux/mount.h: tento strom ma navyse "void *data;" za ANDROID_KABI_RESERVE(4)
           if ! grep -q "CONFIG_KSU_SUSFS" include/linux/mount.h; then
-            python3 - <<'PYEOF'
-import re
-p = "include/linux/mount.h"
-s = open(p).read()
-old = "\tANDROID_KABI_RESERVE(4);\n\tvoid *data;\n} __randomize_layout;"
-new = ("#ifdef CONFIG_KSU_SUSFS\n"
-       "\tANDROID_KABI_USE(4, u64 susfs_mnt_id_backup);\n"
-       "#else\n"
-       "\tANDROID_KABI_RESERVE(4);\n"
-       "#endif\n"
-       "\tvoid *data;\n} __randomize_layout;")
-assert old in s, "mount.h: ocakavany kontext sa nenasiel, treba rucne skontrolovat"
-open(p, "w").write(s.replace(old, new, 1))
-print("mount.h: OK")
-PYEOF
+            python3 "$GITHUB_WORKSPACE/scripts/fix_mount_h.py"
           fi
-
-          # fs/proc/task_mmu.c: tento strom ma navyse 2 includy za pkeys.h (mm_inline.h, ctype.h)
           if ! grep -q "susfs_def.h" fs/proc/task_mmu.c; then
-            python3 - <<'PYEOF'
-p = "fs/proc/task_mmu.c"
-s = open(p).read()
-old = "#include <linux/pkeys.h>\n"
-new = (old +
-       "#ifdef CONFIG_KSU_SUSFS_SUS_KSTAT\n"
-       "#include <linux/susfs_def.h>\n"
-       "#endif\n")
-assert old in s, "task_mmu.c: ocakavany kontext sa nenasiel, treba rucne skontrolovat"
-open(p, "w").write(s.replace(old, new, 1))
-print("task_mmu.c: OK")
-PYEOF
+            python3 "$GITHUB_WORKSPACE/scripts/fix_task_mmu.py"
           fi
 
           echo "=== 5. bootconfig.c spoof - preskakujem, subor v tomto strome neexistuje (volitelne, neblokujuce) ==="
