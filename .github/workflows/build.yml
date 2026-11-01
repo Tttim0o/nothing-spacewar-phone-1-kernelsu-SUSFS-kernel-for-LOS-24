@@ -42,24 +42,46 @@ jobs:
           git clone --depth=1 https://github.com/kdrag0n/proton-clang "$GITHUB_WORKSPACE/clang"
           "$GITHUB_WORKSPACE/clang/bin/clang" --version | head -1
 
-      - name: Integruj KernelSU-Next
+      - name: Integruj KernelSU-Next (legacy vetva - manual hook, pre starsie kernely bez KPROBES)
         working-directory: kernel
         run: |
-          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -
+          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/legacy/kernel/setup.sh" | bash -s legacy
 
-      - name: Compat shim pre linux/pgtable.h (KSU-Next predpoklada 5.10+, tento kernel je 5.4)
+      - name: Compat shim pre linux/pgtable.h (hlavicka pribudla az v 5.10+, tento kernel je 5.4)
         working-directory: kernel
         run: |
           if [ ! -f include/linux/pgtable.h ]; then
             cat > include/linux/pgtable.h <<'EOF'
           /* Compat shim: tento 5.4 kernel ma pgtable iba pod asm/pgtable.h,
-           * ale KernelSU-Next (next branch) uz ocakava linux/pgtable.h (5.10+). */
+           * ale KernelSU-Next uz ocakava linux/pgtable.h (5.10+). */
           #ifndef _COMPAT_LINUX_PGTABLE_H
           #define _COMPAT_LINUX_PGTABLE_H
           #include <asm/pgtable.h>
           #endif
           EOF
             echo "OK: vytvoreny compat shim include/linux/pgtable.h"
+          fi
+
+      - name: Oprava pkg_observer.c (tento vendor strom hlasi kompilatoru inu verziu, nez ake API realne ma)
+        working-directory: kernel
+        run: |
+          PO=KernelSU-Next/kernel/manager/pkg_observer.c
+          if [ -f "$PO" ]; then
+            echo "=== over, ci TWA_RESUME a fsnotify_ops.handle_event su v tomto strome stare API ==="
+            grep -q "handle_inode_event" include/linux/fsnotify_backend.h && \
+              echo "POZOR: tento strom ma uz nove fsnotify API, nutne prehodnotit" || \
+              echo "OK: tento strom ma stare fsnotify API (handle_event) ako ocakavane"
+            # Vynuti staru vetvu kodu (handle_event), nie novu (handle_inode_event) -
+            # LINUX_VERSION_CODE v tomto vendor strome je nespolahlivy indikator.
+            sed -i 's/#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 9, 0)/#if 0 \/* vynutene: tento vendor 5.4 strom ma len stare fsnotify_ops API *\//' "$PO"
+            # Zabezpeci TWA_RESUME fallback bez ohladu na (nespolahlivy) LINUX_VERSION_CODE check
+            printf '%s\n' '#ifndef TWA_RESUME' '#define TWA_RESUME true' '#endif' > /tmp/twa_shim.h
+            cat /tmp/twa_shim.h "$PO" > /tmp/pkg_observer_new.c
+            mv /tmp/pkg_observer_new.c "$PO"
+            echo "=== vysledny stav kritickych riadkov ==="
+            grep -n "TWA_RESUME true\|#if 0 /\* vynutene" "$PO"
+          else
+            echo "pkg_observer.c neexistuje v tejto vetve KSU-Next, nic netreba opravovat"
           fi
 
       - name: Aplikuj SUSFS patche
