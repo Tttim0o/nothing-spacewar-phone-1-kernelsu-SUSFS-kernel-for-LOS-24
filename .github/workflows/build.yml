@@ -47,6 +47,21 @@ jobs:
         run: |
           curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -
 
+      - name: Compat shim pre linux/pgtable.h (KSU-Next predpoklada 5.10+, tento kernel je 5.4)
+        working-directory: kernel
+        run: |
+          if [ ! -f include/linux/pgtable.h ]; then
+            cat > include/linux/pgtable.h <<'EOF'
+          /* Compat shim: tento 5.4 kernel ma pgtable iba pod asm/pgtable.h,
+           * ale KernelSU-Next (next branch) uz ocakava linux/pgtable.h (5.10+). */
+          #ifndef _COMPAT_LINUX_PGTABLE_H
+          #define _COMPAT_LINUX_PGTABLE_H
+          #include <asm/pgtable.h>
+          #endif
+          EOF
+            echo "OK: vytvoreny compat shim include/linux/pgtable.h"
+          fi
+
       - name: Aplikuj SUSFS patche
         working-directory: kernel
         run: |
