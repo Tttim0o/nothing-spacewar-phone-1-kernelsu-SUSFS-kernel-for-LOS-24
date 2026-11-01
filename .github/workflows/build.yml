@@ -1,0 +1,113 @@
+name: Build Spacewar KSU+SUSFS Kernel
+
+on:
+  workflow_dispatch:
+    inputs:
+      los_branch:
+        description: "LineageOS kernel branch"
+        required: true
+        default: "lineage-24.0"
+      stock_boot_url:
+        description: "URL na stock boot.img z tvojho LOS 24 buildu (nepovinne - ak das, dostanes hotovy boot.img)"
+        required: false
+        default: ""
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      # --- SKONTROLUJ PO NAKLONOVANI (arch/arm64/configs/vendor/) ---
+      DEFCONFIG: "vendor/lahaina-qgki_defconfig vendor/nothing_QGKI.config"
+      KERNEL_SRC: "https://github.com/LineageOS/android_kernel_nothing_sm7325"
+      SUSFS_BRANCH: "kernel-5.4"
+      ANYKERNEL: "https://github.com/osm0sis/AnyKernel3"
+      CLANG_URL: "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r450784e.tar.gz"
+
+    steps:
+      - name: Priprava prostredia
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc bison build-essential ccache curl flex \
+            git libssl-dev libncurses5-dev libelf-dev zip python3 \
+            device-tree-compiler unzip wget
+
+      - name: Stiahni kernel zdrojaky
+        run: |
+          git clone --depth=1 -b "${{ github.event.inputs.los_branch }}" \
+            "$KERNEL_SRC" kernel
+
+      - name: AOSP Clang toolchain
+        run: |
+          mkdir -p clang && cd clang
+          curl -LSs "$CLANG_URL" -o c.tar.gz
+          tar -xzf c.tar.gz && rm c.tar.gz
+
+      - name: Integruj KernelSU-Next
+        working-directory: kernel
+        run: |
+          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -
+
+      - name: Aplikuj SUSFS patche
+        working-directory: kernel
+        run: |
+          git clone --depth=1 -b "$SUSFS_BRANCH" \
+            https://gitlab.com/simonpunk/susfs4ksu.git ../susfs4ksu
+          cp ../susfs4ksu/kernel_patches/fs/* fs/
+          cp ../susfs4ksu/kernel_patches/include/linux/* include/linux/
+          cp ../susfs4ksu/kernel_patches/KernelSU*/* KernelSU-Next/ 2>/dev/null || true
+          patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_*-5.4.patch || true
+          curl -LSs "https://raw.githubusercontent.com/WildPlusKernel/kernel_patches/main/69_hide_stuff.patch" -o hide.patch
+          patch -p1 < hide.patch || true
+
+      - name: Zapni SUSFS v defconfigu
+        working-directory: kernel
+        run: |
+          cat >> arch/arm64/configs/vendor/nothing_QGKI.config <<'EOF'
+          CONFIG_KSU=y
+          CONFIG_KSU_SUSFS=y
+          CONFIG_KSU_SUSFS_SUS_PATH=y
+          CONFIG_KSU_SUSFS_SUS_MOUNT=y
+          CONFIG_KSU_SUSFS_SUS_KSTAT=y
+          CONFIG_KSU_SUSFS_TRY_UMOUNT=y
+          CONFIG_KSU_SUSFS_SPOOF_UNAME=y
+          CONFIG_KSU_SUSFS_ENABLE_LOG=n
+          CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y
+          CONFIG_TMPFS_XATTR=y
+          EOF
+
+      - name: Build kernelu
+        working-directory: kernel
+        run: |
+          export PATH="$GITHUB_WORKSPACE/clang/bin:$PATH"
+          export ARCH=arm64 SUBARCH=arm64
+          make O=out CC=clang LLVM=1 LLVM_IAS=1 ARCH=arm64 $DEFCONFIG
+          make -j$(nproc) O=out CC=clang LLVM=1 LLVM_IAS=1 ARCH=arm64
+
+      - name: Zabal AnyKernel3 zip
+        run: |
+          git clone --depth=1 "$ANYKERNEL" ak3
+          cp kernel/out/arch/arm64/boot/Image* ak3/ 2>/dev/null || \
+            cp kernel/out/arch/arm64/boot/Image ak3/
+          cp kernel/out/arch/arm64/boot/dtb* ak3/ 2>/dev/null || true
+          cd ak3 && zip -r9 ../Spacewar-KSU-SUSFS.zip . -x ".git*"
+
+      - name: (volitelne) Vyrob hotovy boot.img
+        if: ${{ github.event.inputs.stock_boot_url != '' }}
+        run: |
+          wget -q "https://github.com/topjohnwu/Magisk/releases/latest/download/Magisk-v28.1.apk" -O magisk.apk || \
+            wget -q "https://github.com/topjohnwu/Magisk/releases/download/v27.0/Magisk-v27.0.apk" -O magisk.apk
+          unzip -o magisk.apk "lib/x86_64/*" -d magisk
+          cp magisk/lib/x86_64/libmagiskboot.so ./magiskboot
+          chmod +x magiskboot
+          curl -LSs "${{ github.event.inputs.stock_boot_url }}" -o stock-boot.img
+          ./magiskboot unpack stock-boot.img
+          cp kernel/out/arch/arm64/boot/Image kernel
+          ./magiskboot repack stock-boot.img new-boot.img
+
+      - name: Nahraj vysledky
+        uses: actions/upload-artifact@v4
+        with:
+          name: Spacewar-KSU-SUSFS
+          path: |
+            Spacewar-KSU-SUSFS.zip
+            new-boot.img
