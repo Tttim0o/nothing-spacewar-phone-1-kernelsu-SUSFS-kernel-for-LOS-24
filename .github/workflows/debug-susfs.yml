@@ -10,11 +10,38 @@ jobs:
       - name: Clone susfs4ksu kernel-5.4
         run: |
           git clone --depth=1 -b kernel-5.4 https://gitlab.com/simonpunk/susfs4ksu.git susfs4ksu
-          echo "=== tree ==="
-          find susfs4ksu/kernel_patches -maxdepth 3 | sort
+          echo "=== FULL TREE ==="
+          find susfs4ksu/kernel_patches | sort
 
-      - name: Upload patches as artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: susfs-patches-dump
-          path: susfs4ksu/kernel_patches
+      - name: Dump patch filenames and sizes
+        run: |
+          echo "=== *.patch files ==="
+          find susfs4ksu/kernel_patches -name "*.patch" -exec ls -la {} \;
+
+      - name: Dump 50_add_susfs patch (mount.h + task_mmu.c + bootconfig.c hunks)
+        run: |
+          P=$(find susfs4ksu/kernel_patches -iname "50_add_susfs*5.4*.patch" -o -iname "50_add_susfs*5_4*.patch" | head -1)
+          if [ -z "$P" ]; then
+            P=$(find susfs4ksu/kernel_patches -iname "50_add_susfs*.patch" | head -1)
+          fi
+          echo "PATCH FILE: $P"
+          echo "=== mount.h section ==="
+          awk '/a\/include\/linux\/mount.h/,/^diff --git/' "$P" | head -120
+          echo "=== task_mmu.c section ==="
+          awk '/a\/fs\/proc\/task_mmu.c/,/^diff --git/' "$P" | head -150
+          echo "=== bootconfig.c section ==="
+          awk '/a\/fs\/proc\/bootconfig.c/,/^diff --git/' "$P" | head -60
+
+      - name: Check hide_stuff patch source candidates
+        run: |
+          for url in \
+            "https://raw.githubusercontent.com/TheWildJames/kernel_patches/main/69_hide_stuff.patch" \
+            "https://raw.githubusercontent.com/TheWildJames/kernel_patches/master/69_hide_stuff.patch" \
+            "https://raw.githubusercontent.com/WildPlusKernel/kernel_patches/main/69_hide_stuff.patch" \
+            "https://raw.githubusercontent.com/backslashxx/kernel_patches/main/69_hide_stuff.patch" \
+            ; do
+            echo "=== $url ==="
+            curl -sS -o /tmp/t.patch -w "HTTP:%{http_code}\n" "$url"
+            head -c 200 /tmp/t.patch
+            echo ""
+          done
