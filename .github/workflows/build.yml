@@ -63,6 +63,14 @@ jobs:
         run: |
           curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/legacy/kernel/setup.sh" | bash -s "$KSUN_PIN"
 
+      - name: Oprava selinux.h (rovnaky LINUX_VERSION_CODE drift ako pkg_observer.c)
+        working-directory: kernel
+        run: |
+          if grep -q "LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0)) || defined(KSU_COMPAT_HAS_SELINUX_STATE)" \
+              KernelSU-Next/kernel/selinux/selinux.h; then
+            python3 "$GITHUB_WORKSPACE/scripts/fix_selinux_compat.py"
+          fi
+
       - name: Compat shim pre linux/pgtable.h (hlavicka pribudla az v 5.10+, tento kernel je 5.4)
         working-directory: kernel
         run: |
