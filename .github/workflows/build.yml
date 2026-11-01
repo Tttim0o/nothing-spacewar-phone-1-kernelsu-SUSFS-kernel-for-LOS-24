@@ -31,7 +31,7 @@ jobs:
       - name: Priprava prostredia
         run: |
           sudo apt-get update
-          sudo apt-get install -y bc bison build-essential ccache curl flex \
+          sudo apt-get install -y bc bison build-essential ccache cpio curl flex \
             git libssl-dev libncurses5-dev libelf-dev zip python3 \
             device-tree-compiler unzip wget
 
@@ -144,8 +144,14 @@ jobs:
           if ! grep -q "susfs_def.h" fs/proc/task_mmu.c; then
             python3 "$GITHUB_WORKSPACE/scripts/fix_task_mmu.py"
           fi
-          if grep -q "bool is_zygote_child = susfs_is_sid_equal" KernelSU-Next/kernel/core_hook.c; then
+          if grep -q "bool is_zygote_child = is_zygote(old->security)" KernelSU-Next/kernel/core_hook.c; then
             python3 "$GITHUB_WORKSPACE/scripts/fix_core_hook.py"
+          fi
+          if grep -q "^bool is_manager_apk" KernelSU-Next/kernel/apk_sign.c; then
+            python3 "$GITHUB_WORKSPACE/scripts/fix_apk_sign.py"
+          fi
+          if grep -q "strncpy_from_unsafe_user" KernelSU-Next/kernel/kernel_compat.c; then
+            python3 "$GITHUB_WORKSPACE/scripts/fix_kernel_compat.py"
           fi
 
           echo "=== 5. bootconfig.c spoof - preskakujem, subor v tomto strome neexistuje (volitelne, neblokujuce) ==="
