@@ -15,13 +15,14 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     env:
-      # --- SKONTROLUJ PO NAKLONOVANI (arch/arm64/configs/vendor/) ---
-      DEFCONFIG: "vendor/lahaina-qgki_defconfig vendor/nothing_QGKI.config"
+      DEFCONFIG: "vendor/lahaina-qgki_defconfig vendor/lahaina_QGKI.config"
+      CONFIG_FRAGMENT: "arch/arm64/configs/vendor/lahaina_QGKI.config"
       KERNEL_SRC: "https://github.com/LineageOS/android_kernel_nothing_sm7325"
       SUSFS_BRANCH: "kernel-5.4"
       ANYKERNEL: "https://github.com/osm0sis/AnyKernel3"
-      CLANG_URL: "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r450784e.tar.gz"
 
     steps:
       - name: Priprava prostredia
@@ -36,11 +37,15 @@ jobs:
           git clone --depth=1 -b "${{ github.event.inputs.los_branch }}" \
             "$KERNEL_SRC" kernel
 
-      - name: AOSP Clang toolchain
+      - name: Neutron Clang toolchain
         run: |
-          mkdir -p clang && cd clang
-          curl -LSs "$CLANG_URL" -o c.tar.gz
-          tar -xzf c.tar.gz && rm c.tar.gz
+          mkdir -p "$GITHUB_WORKSPACE/clang"
+          cd "$GITHUB_WORKSPACE/clang"
+          curl -LSsO "https://raw.githubusercontent.com/Neutron-Clang/antman/main/antman"
+          chmod +x antman
+          ./antman -S
+          ./antman --patch=glibc
+          ./bin/clang --version | head -1
 
       - name: Integruj KernelSU-Next
         working-directory: kernel
@@ -52,17 +57,25 @@ jobs:
         run: |
           git clone --depth=1 -b "$SUSFS_BRANCH" \
             https://gitlab.com/simonpunk/susfs4ksu.git ../susfs4ksu
-          cp ../susfs4ksu/kernel_patches/fs/* fs/
-          cp ../susfs4ksu/kernel_patches/include/linux/* include/linux/
+          cp ../susfs4ksu/kernel_patches/fs/* fs/ 2>/dev/null || true
+          cp ../susfs4ksu/kernel_patches/include/linux/* include/linux/ 2>/dev/null || true
           cp ../susfs4ksu/kernel_patches/KernelSU*/* KernelSU-Next/ 2>/dev/null || true
-          patch -p1 < ../susfs4ksu/kernel_patches/50_add_susfs_in_*-5.4.patch || true
+          echo "=== hladam SUSFS patch pre 5.4 ==="
+          ls ../susfs4ksu/kernel_patches/
+          SUSFS_PATCH=$(ls ../susfs4ksu/kernel_patches/50_add_susfs_in_*.patch 2>/dev/null | grep -E '5[._]4' | head -1)
+          echo "Pouzivam patch: ${SUSFS_PATCH:-ZIADNY NENAJDENY}"
+          if [ -n "$SUSFS_PATCH" ]; then
+            patch -p1 < "$SUSFS_PATCH" || echo "VAROVANIE: SUSFS patch nepresiel cisto (riesime nizsie kontrolou configu)"
+          else
+            echo "VAROVANIE: nenasiel sa 5.4 SUSFS patch"
+          fi
           curl -LSs "https://raw.githubusercontent.com/WildPlusKernel/kernel_patches/main/69_hide_stuff.patch" -o hide.patch
-          patch -p1 < hide.patch || true
+          patch -p1 < hide.patch || echo "VAROVANIE: hide_stuff patch nepresiel cisto"
 
-      - name: Zapni SUSFS v defconfigu
+      - name: Zapni KSU/SUSFS vo fragmente
         working-directory: kernel
         run: |
-          cat >> arch/arm64/configs/vendor/nothing_QGKI.config <<'EOF'
+          cat >> "$CONFIG_FRAGMENT" <<'EOF'
           CONFIG_KSU=y
           CONFIG_KSU_SUSFS=y
           CONFIG_KSU_SUSFS_SUS_PATH=y
@@ -80,8 +93,13 @@ jobs:
         run: |
           export PATH="$GITHUB_WORKSPACE/clang/bin:$PATH"
           export ARCH=arm64 SUBARCH=arm64
-          make O=out CC=clang LLVM=1 LLVM_IAS=1 ARCH=arm64 $DEFCONFIG
-          make -j$(nproc) O=out CC=clang LLVM=1 LLVM_IAS=1 ARCH=arm64
+          export KBUILD_BUILD_USER=claude KBUILD_BUILD_HOST=github-actions
+          make O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 $DEFCONFIG
+          echo "=== kontrola, ci sa KSU a SUSFS naozaj zapli ==="
+          grep -q "CONFIG_KSU=y" out/.config || { echo "CHYBA: KSU nie je v .config - KSU integracia zlyhala"; exit 1; }
+          grep -q "CONFIG_KSU_SUSFS=y" out/.config || { echo "CHYBA: SUSFS nie je v .config - SUSFS patch sa neaplikoval"; exit 1; }
+          echo "OK: KSU aj SUSFS su zapnute"
+          make -j$(nproc) O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 KCFLAGS="-Wno-error"
 
       - name: Zabal AnyKernel3 zip
         run: |
@@ -104,10 +122,35 @@ jobs:
           cp kernel/out/arch/arm64/boot/Image kernel
           ./magiskboot repack stock-boot.img new-boot.img
 
-      - name: Nahraj vysledky
+      - name: Nahraj artefakty
         uses: actions/upload-artifact@v4
         with:
           name: Spacewar-KSU-SUSFS
           path: |
             Spacewar-KSU-SUSFS.zip
             new-boot.img
+
+      - name: Vytvor prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="build-${{ github.run_number }}-$(date +%Y%m%d)"
+          cat > notes.md <<'EOF'
+          ## NETESTOVANY, EXPERIMENTALNY BUILD
+
+          Kernel pre **Nothing Phone (1) (Spacewar, sm7325)** na **LineageOS 24 (Android 17)** s **KernelSU-Next + SUSFS**.
+
+          - Build bol vygenerovany automaticky pomocou AI (Claude) a **NEBOL otestovany na realnom zariadeni**.
+          - **NEFLASHUJ naslepo.** Najprv `fastboot boot new-boot.img` (docasne), az po overeni `fastboot flash boot`.
+          - Vzdy si zalohuj stock `boot.img`.
+          - Autor ani siritel neruci za ziadne skody. Flashujes na vlastne riziko.
+          EOF
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Spacewar KSU+SUSFS (netestovany build #${{ github.run_number }})" \
+            --prerelease \
+            --notes-file notes.md \
+            Spacewar-KSU-SUSFS.zip
+          if [ -f new-boot.img ]; then
+            gh release upload "$TAG" new-boot.img --repo "$GITHUB_REPOSITORY"
+          fi
